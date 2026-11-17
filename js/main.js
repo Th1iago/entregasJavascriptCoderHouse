@@ -1,292 +1,419 @@
+// =====================================================
+// TIENDA DE REPUESTOS - Simulador
+// Pre-entregas: Funciones, DOM y eventos, Storage, Asincronismo
+// =====================================================
 
-class Producto {
-    constructor(id, nombre, precio, categoria, stock) {
-        this.id = id;
-        this.nombre = nombre;
-        this.precio = precio;
-        this.categoria = categoria;
-        this.stock = stock;
-    }
-
-    vender(cantidad) {
-        if (cantidad > 0 && cantidad <= this.stock) {
-            this.stock -= cantidad;
-            return true;
-        }
-        return false;
-    }
-
-    aplicarDescuento(porcentaje) {
-        this.precio = Math.round(this.precio - (this.precio * porcentaje) / 100);
-    }
-
-    sumarIva() {
-        return Math.round(this.precio * 1.21);
-    }
-}
+// ---------- Datos ----------
+const IVA = 1.21;
+const CLAVE_CATALOGO = "catalogo";
+const CLAVE_CARRITO = "carrito";
 
 const categorias = ["Frenos", "Filtros", "Suspensión", "Motor", "Eléctrico"];
 
-const producto1 = new Producto(1, "Pastillas de freno", 18500, "Frenos", 12);
-const producto2 = new Producto(2, "Filtro de aceite", 4200, "Filtros", 30);
-const producto3 = new Producto(3, "Amortiguador delantero", 62000, "Suspensión", 6);
-const producto4 = new Producto(4, "Bujía", 3800, "Motor", 40);
-const producto5 = new Producto(5, "Batería 12V", 95000, "Eléctrico", 5);
+const catalogoInicial = [
+    { id: 1, nombre: "Pastillas de freno", precio: 18500, categoria: "Frenos", stock: 12 },
+    { id: 2, nombre: "Filtro de aceite", precio: 4200, categoria: "Filtros", stock: 30 },
+    { id: 3, nombre: "Amortiguador delantero", precio: 62000, categoria: "Suspensión", stock: 6 },
+    { id: 4, nombre: "Bujía", precio: 3800, categoria: "Motor", stock: 40 },
+    { id: 5, nombre: "Batería 12V", precio: 95000, categoria: "Eléctrico", stock: 5 }
+];
 
-const catalogo = [producto1, producto2, producto3, producto4, producto5]; // array de objetos
-const carrito = [];
-let proximoId = 6;
+// ---------- Estado ----------
+let catalogo = [];
+let carrito = [];
+let filtros = { texto: "", maximo: null };
+let soloTop = false;
+let idResaltado = null;
+let temporizadorFeedback;
 
-function pedirTexto(mensaje) {
-    let texto = (prompt(mensaje) ?? "").trim();
-    while (texto === "") {
-        texto = (prompt("Dato inválido. " + mensaje) ?? "").trim();
-    }
-    return texto;
-}
+// ---------- Elementos del DOM ----------
+const $ = (selector) => document.querySelector(selector);
 
-function pedirNumero(mensaje, minimo) {
-    let valor = parseFloat(prompt(mensaje));
-    while (isNaN(valor) || valor < minimo) {
-        valor = parseFloat(prompt("Valor inválido. " + mensaje));
-    }
-    return valor;
-}
+const form = $("#form-producto");
+const listaProductos = $("#lista-productos");
+const listaCarrito = $("#lista-carrito");
+const totalCarrito = $("#total-carrito");
+const feedback = $("#feedback");
+const estado = $("#estado");
+const aviso = $("#aviso");
 
-function pedirOpcion(mensaje, minimo, maximo) {
-    let opcion = parseInt(prompt(mensaje));
-    while (isNaN(opcion) || opcion < minimo || opcion > maximo) {
-        opcion = parseInt(prompt("Opción inválida.\n" + mensaje));
-    }
-    return opcion;
-}
-
-function pedirCategoria(listaCategorias) {
-    let texto = "Elegí la categoría:\n";
-    for (const categoria of listaCategorias) {
-        texto += (listaCategorias.indexOf(categoria) + 1) + ": " + categoria + "\n";
-    }
-    const opcion = pedirOpcion(texto, 1, listaCategorias.length);
-    return listaCategorias[opcion - 1];
-}
-
-function pedirProducto(listaCategorias) {
-    const nombre = pedirTexto("Nombre del producto:");
-    const precio = pedirNumero("Precio:", 1);
-    const categoria = pedirCategoria(listaCategorias);
-    const stock = pedirNumero("Stock:", 0);
-    return new Producto(proximoId++, nombre, precio, categoria, stock);
-}
-
-const obtenerNombres = (lista) => lista.map((p) => p.nombre.toLowerCase());
+// =====================================================
+// FUNCIONES FLECHA (procesos simples, devuelven un valor)
+// =====================================================
+const sumarIva = (precio) => Math.round(precio * IVA);
+const calcularPrecioConDescuento = (precio, porcentaje) =>
+    Math.round(precio - (precio * porcentaje) / 100);
+const calcularTotal = (items) =>
+    items.reduce((acumulado, { precio, cantidad }) => acumulado + precio * cantidad, 0);
 const buscarPorId = (lista, id) => lista.find((p) => p.id === id);
-const filtrarPorPrecioMaximo = (lista, maximo) => lista.filter((p) => p.precio <= maximo);
 const topMasCaros = (lista, cantidad) =>
     [...lista].sort((a, b) => b.precio - a.precio).slice(0, cantidad);
-const calcularTotal = (items) =>
-    items.reduce((acumulado, item) => acumulado + item.precio * item.cantidad, 0);
+const generarId = (lista) => Math.max(0, ...lista.map((p) => p.id)) + 1;
+const formatearPrecio = (valor) => "$" + valor.toLocaleString("es-AR");
 
-function buscarIndicePorNombre(lista, nombre) {
-    const nombres = obtenerNombres(lista);
-    const buscado = nombre.toLowerCase();
-    if (!nombres.includes(buscado)) {
-        return -1;
+// =====================================================
+// STORAGE (lectura con ?? y JSON.parse, escritura con JSON.stringify)
+// =====================================================
+function leerStorage(clave, porDefecto) {
+    try {
+        // ?? cubre el caso de la primera vez, cuando todavía no existe la clave
+        return JSON.parse(localStorage.getItem(clave) ?? "null") ?? porDefecto;
+    } catch (error) {
+        return porDefecto; // JSON corrupto: arrancamos con el valor por defecto
     }
-    return nombres.indexOf(buscado);
 }
 
-
-function agregarAlFinal(lista, producto) {
-    lista.push(producto);
+function guardarStorage(clave, datos) {
+    localStorage.setItem(clave, JSON.stringify(datos));
 }
 
-function agregarAlPrincipio(lista, producto) {
-    lista.unshift(producto);
+const persistir = () => {
+    guardarStorage(CLAVE_CATALOGO, catalogo);
+    guardarStorage(CLAVE_CARRITO, carrito);
+};
+
+// =====================================================
+// FEEDBACK VISUAL
+// =====================================================
+function mostrarFeedback(texto, tipo = "ok") {
+    clearTimeout(temporizadorFeedback);
+    feedback.textContent = texto;
+    feedback.className = "feedback " + tipo;
+    temporizadorFeedback = setTimeout(() => {
+        feedback.textContent = "";
+        feedback.className = "feedback";
+    }, 4000);
+}
+
+// =====================================================
+// ASINCRONISMO
+// =====================================================
+
+// Promesa: simula una carga de datos del servidor
+const obtenerCatalogo = () =>
+    new Promise((resolve) => {
+        setTimeout(() => {
+            resolve(leerStorage(CLAVE_CATALOGO, catalogoInicial.map((p) => ({ ...p }))));
+        }, 1500);
+    });
+
+// Se consume con async/await dentro de try/catch/finally
+async function cargarProductos() {
+    estado.textContent = "⏳ Cargando productos...";
+    try {
+        catalogo = await obtenerCatalogo();
+        carrito = leerStorage(CLAVE_CARRITO, []);
+        persistir();
+        renderTodo();
+        mostrarFeedback(`✔️ ${catalogo.length} productos cargados`);
+    } catch (error) {
+        mostrarFeedback("⚠️ No se pudieron cargar los productos, intentá de nuevo", "error");
+    } finally {
+        estado.textContent = ""; // se ejecuta siempre
+    }
+}
+
+// Temporizador: información complementaria unos segundos después de entrar
+function programarAviso(texto, milisegundos) {
+    setTimeout(() => {
+        aviso.textContent = "🔔 " + texto;
+        aviso.hidden = false;
+    }, milisegundos);
+}
+
+// =====================================================
+// LÓGICA DEL SIMULADOR (entrada -> procesamiento -> salida)
+// =====================================================
+
+// Entrada: lee y valida el formulario (lanza error si hay datos inválidos)
+function leerFormulario(formulario) {
+    const { nombre, precio, categoria, stock, destacado } = formulario.elements;
+    const datos = {
+        nombre: nombre.value.trim(),
+        precio: Number(precio.value),
+        categoria: categoria.value,
+        stock: Number(stock.value)
+    };
+
+    if (datos.nombre === "") throw new Error("El nombre no puede estar vacío.");
+    if (!(datos.precio > 0)) throw new Error("El precio tiene que ser mayor a 0.");
+    if (!Number.isInteger(datos.stock) || datos.stock < 0) {
+        throw new Error("El stock tiene que ser un número entero, 0 o más.");
+    }
+    return { datos, alPrincipio: destacado.checked };
+}
+
+// Procesamiento
+function agregarProducto(datos, alPrincipio) {
+    const nuevo = { id: generarId(catalogo), ...datos };
+    alPrincipio ? catalogo.unshift(nuevo) : catalogo.push(nuevo);
+    idResaltado = nuevo.id;
+    return nuevo;
+}
+
+function eliminarProducto(id) {
+    const indice = catalogo.findIndex((p) => p.id === id);
+    if (indice === -1) throw new Error("El producto no existe.");
+    const [eliminado] = catalogo.splice(indice, 1);
+    return eliminado;
 }
 
 function eliminarUltimo(lista) {
+    if (lista.length === 0) throw new Error("No hay productos para eliminar.");
     return lista.pop();
 }
 
-function reemplazarPorIndice(lista, indice, productoNuevo) {
-    return lista.splice(indice, 1, productoNuevo)[0];
+function comprarProducto(id, cantidad) {
+    const producto = buscarPorId(catalogo, id);
+    if (!producto) throw new Error("El producto no existe.");
+    if (!Number.isInteger(cantidad) || cantidad < 1) throw new Error("La cantidad no es válida.");
+
+    const { nombre, precio, stock } = producto;
+    if (cantidad > stock) throw new Error(`Stock insuficiente. Disponible: ${stock}`);
+
+    producto.stock -= cantidad;
+    const enCarrito = carrito.find((item) => item.id === id);
+    enCarrito
+        ? (enCarrito.cantidad += cantidad)
+        : carrito.push({ id, nombre, precio, cantidad });
+    return { nombre, cantidad };
 }
 
-function mostrarMensaje(texto) {
-    alert(texto);
-    console.log(texto);
-}
-
-const formatearProducto = (p) =>
-    `ID ${p.id} | Producto: ${p.nombre} | $${p.precio} (c/IVA $${p.sumarIva()}) | ${p.categoria} | Stock: ${p.stock}`;
-
-function reporteLista(titulo, lista) {
-    if (lista.length === 0) {
-        return titulo + "\n(sin productos)";
+function aplicarDescuento(id, porcentaje) {
+    const producto = buscarPorId(catalogo, id);
+    if (!producto) throw new Error("El producto no existe.");
+    if (!Number.isInteger(porcentaje) || porcentaje < 1 || porcentaje > 90) {
+        throw new Error("El descuento tiene que ser un entero entre 1 y 90.");
     }
-    let texto = titulo + "\n";
-    for (const producto of lista) {
-        texto += formatearProducto(producto) + "\n";
-    }
-    return texto;
+    producto.precio = calcularPrecioConDescuento(producto.precio, porcentaje);
+    return producto;
 }
 
-function reporteCarrito(items) {
-    if (items.length === 0) {
-        return "El carrito está vacío.";
-    }
-    let texto = "Carrito:\n";
-    for (const item of items) {
-        texto += `${item.cantidad} x ${item.nombre} = $${item.precio * item.cantidad}\n`;
-    }
-    texto += "TOTAL: $" + calcularTotal(items);
-    return texto;
+// Devuelve el stock al catálogo (si el producto todavía existe)
+function devolverStock(id, cantidad) {
+    const producto = buscarPorId(catalogo, id);
+    if (producto) producto.stock += cantidad;
 }
 
-function verificarObjetos(prod1, prod2, prod3) {
-    prod1.vender(2);
-    prod2.aplicarDescuento(10);
-    console.log("Verificación de objetos:");
-    console.log(prod1.nombre + " -> stock: " + prod1.stock);
-    console.log(prod2.nombre + " -> precio con 10% off: $" + prod2.precio);
-    console.log(prod3.nombre + " -> precio con IVA: $" + prod3.sumarIva());
+function quitarDelCarrito(id) {
+    const indice = carrito.findIndex((item) => item.id === id);
+    if (indice === -1) throw new Error("El producto no está en el carrito.");
+    const [{ nombre, cantidad }] = carrito.splice(indice, 1);
+    devolverStock(id, cantidad);
+    return nombre;
 }
 
+function vaciarCarrito() {
+    if (carrito.length === 0) throw new Error("El carrito ya está vacío.");
+    carrito.forEach(({ id, cantidad }) => devolverStock(id, cantidad));
+    carrito = [];
+}
 
-const textoMenu =
-    "TIENDA DE REPUESTOS\n" +
-    "1: Ver catálogo\n" +
-    "2: Buscar producto por nombre\n" +
-    "3: Agregar producto al final\n" +
-    "4: Agregar oferta destacada al principio\n" +
-    "5: Eliminar el último producto\n" +
-    "6: Reemplazar producto por posición\n" +
-    "7: Filtrar por precio máximo\n" +
-    "8: Ver los 3 más caros\n" +
-    "9: Comprar (agregar al carrito)\n" +
-    "10: Ver carrito y total\n" +
-    "11: Aplicar descuento a un producto\n" +
-    "0: Salir\n\nElegí una opción:";
+// Qué productos se ven según búsqueda, precio máximo y "3 más caros"
+function obtenerVista(lista, { texto, maximo }, mostrarTop) {
+    const resultado = lista.filter(
+        ({ nombre, precio }) =>
+            nombre.toLowerCase().includes(texto.toLowerCase()) && precio <= (maximo ?? Infinity)
+    );
+    return mostrarTop ? topMasCaros(resultado, 3) : resultado;
+}
 
-function menu(lista, listaCarrito, listaCategorias) {
-    let opcion;
+// =====================================================
+// RENDER (salida en pantalla)
+// =====================================================
+function crearElemento(etiqueta, clase, texto) {
+    const elemento = document.createElement(etiqueta);
+    if (clase) elemento.className = clase;
+    if (texto !== undefined) elemento.textContent = texto;
+    return elemento;
+}
 
-    do {
-        opcion = pedirOpcion(textoMenu, 0, 11);
+function crearTarjeta(producto) {
+    const { id, nombre, precio, categoria, stock } = producto;
+    const tarjeta = crearElemento("article", "tarjeta");
+    tarjeta.dataset.id = id;
+    if (id === idResaltado) tarjeta.classList.add("resaltado");
 
-        switch (opcion) {
-            case 1:
-                mostrarMensaje(reporteLista("Catálogo:", lista));
-                break;
+    tarjeta.append(
+        crearElemento("h3", "", nombre),
+        crearElemento("p", "", `${formatearPrecio(precio)} (c/IVA ${formatearPrecio(sumarIva(precio))})`),
+        crearElemento("p", stock > 0 ? "" : "sin-stock", `${categoria} · ${stock > 0 ? "Stock: " + stock : "Sin stock"}`)
+    );
 
-            case 2: {
-                const nombre = pedirTexto("Nombre del producto a buscar:");
-                const indice = buscarIndicePorNombre(lista, nombre);
-                if (indice === -1) {
-                    mostrarMensaje("No existe el producto: " + nombre);
-                } else {
-                    mostrarMensaje(`Existe, está en la posición ${indice}:\n` + formatearProducto(lista[indice]));
-                }
-                break;
-            }
+    const comprar = crearElemento("div", "acciones");
+    const cantidad = crearElemento("input", "cantidad");
+    cantidad.type = "number";
+    cantidad.min = 1;
+    cantidad.value = 1;
+    cantidad.setAttribute("aria-label", "Cantidad");
+    const btnComprar = crearElemento("button", "", "Comprar");
+    btnComprar.dataset.accion = "comprar";
+    comprar.append(cantidad, btnComprar);
 
-            case 3:
-                agregarAlFinal(lista, pedirProducto(listaCategorias));
-                mostrarMensaje("Producto agregado al final.");
-                break;
+    const descuento = crearElemento("div", "acciones");
+    const porcentaje = crearElemento("input", "porcentaje");
+    porcentaje.type = "number";
+    porcentaje.min = 1;
+    porcentaje.max = 90;
+    porcentaje.placeholder = "%";
+    porcentaje.setAttribute("aria-label", "Porcentaje de descuento");
+    const btnDescuento = crearElemento("button", "secundario", "Descuento");
+    btnDescuento.dataset.accion = "descuento";
+    descuento.append(porcentaje, btnDescuento);
 
-            case 4:
-                agregarAlPrincipio(lista, pedirProducto(listaCategorias));
-                mostrarMensaje("Oferta destacada agregada al principio.");
-                break;
+    const btnEliminar = crearElemento("button", "peligro", "Eliminar");
+    btnEliminar.dataset.accion = "eliminar";
 
-            case 5: {
-                const eliminado = eliminarUltimo(lista);
-                if (eliminado === undefined) {
-                    mostrarMensaje("No hay productos para eliminar.");
-                } else {
-                    mostrarMensaje("Se ha eliminado el elemento: " + eliminado.nombre);
-                }
-                break;
-            }
+    tarjeta.append(comprar, descuento, btnEliminar);
+    return tarjeta;
+}
 
-            case 6: {
-                if (lista.length === 0) {
-                    mostrarMensaje("No hay productos para reemplazar.");
-                    break;
-                }
-                mostrarMensaje(reporteLista("Catálogo:", lista));
-                const posicion = pedirOpcion("Posición a reemplazar (1 a " + lista.length + "):", 1, lista.length);
-                const nuevo = pedirProducto(listaCategorias);
-                const reemplazado = reemplazarPorIndice(lista, posicion - 1, nuevo);
-                mostrarMensaje(`Se reemplazó "${reemplazado.nombre}" por "${nuevo.nombre}".`);
-                break;
-            }
+function renderCatalogo() {
+    const vista = obtenerVista(catalogo, filtros, soloTop);
+    listaProductos.replaceChildren(...vista.map(crearTarjeta));
+    if (vista.length === 0) {
+        listaProductos.append(crearElemento("p", "", "No hay productos para mostrar."));
+    }
+    idResaltado = null;
+    $("#btn-top").textContent = soloTop ? "Ver todos" : "Ver los 3 más caros";
+}
 
-            case 7: {
-                const maximo = pedirNumero("Precio máximo:", 1);
-                mostrarMensaje(reporteLista("Productos hasta $" + maximo + ":", filtrarPorPrecioMaximo(lista, maximo)));
-                break;
-            }
+function renderCarrito() {
+    listaCarrito.replaceChildren();
+    if (carrito.length === 0) {
+        listaCarrito.append(crearElemento("li", "vacio", "El carrito está vacío."));
+    }
+    for (const { id, nombre, precio, cantidad } of carrito) {
+        const item = crearElemento("li", "", `${cantidad} x ${nombre} = ${formatearPrecio(precio * cantidad)}`);
+        const quitar = crearElemento("button", "secundario", "Quitar");
+        quitar.dataset.id = id;
+        item.append(quitar);
+        listaCarrito.append(item);
+    }
+    totalCarrito.textContent = formatearPrecio(calcularTotal(carrito));
+}
 
-            case 8:
-                mostrarMensaje(reporteLista("Los 3 más caros:", topMasCaros(lista, 3)));
-                break;
+function renderTodo() {
+    renderCatalogo();
+    renderCarrito();
+}
 
-            case 9: {
-                mostrarMensaje(reporteLista("Catálogo:", lista));
-                const id = pedirNumero("ID del producto a comprar:", 1);
-                const producto = buscarPorId(lista, id);
-                if (producto === undefined) {
-                    mostrarMensaje("No existe un producto con ID " + id);
-                    break;
-                }
-                const cantidad = pedirNumero("Cantidad:", 1);
-                if (producto.vender(cantidad)) {
-                    listaCarrito.push({ nombre: producto.nombre, precio: producto.precio, cantidad: cantidad });
-                    mostrarMensaje(`Agregaste ${cantidad} x ${producto.nombre} al carrito.`);
-                } else {
-                    mostrarMensaje("Stock insuficiente. Disponible: " + producto.stock);
-                }
-                break;
-            }
+// Actualiza datos -> guarda en localStorage -> vuelve a renderizar
+function sincronizar() {
+    persistir();
+    renderTodo();
+}
 
-            case 10:
-                mostrarMensaje(reporteCarrito(listaCarrito));
-                break;
+// =====================================================
+// EVENTOS
+// =====================================================
 
-            case 11: {
-                const id = pedirNumero("ID del producto:", 1);
-                const producto = buscarPorId(lista, id);
-                if (producto === undefined) {
-                    mostrarMensaje("No existe un producto con ID " + id);
-                    break;
-                }
-                const porcentaje = pedirOpcion("Porcentaje de descuento (1 a 90):", 1, 90);
-                producto.aplicarDescuento(porcentaje);
-                mostrarMensaje("Nuevo precio: " + formatearProducto(producto));
-                break;
-            }
+// Agregar producto (submit del formulario)
+form.addEventListener("submit", (evento) => {
+    evento.preventDefault();
+    try {
+        const { datos, alPrincipio } = leerFormulario(form);
+        const { nombre } = agregarProducto(datos, alPrincipio);
+        sincronizar();
+        form.reset();
+        mostrarFeedback(`✔️ Agregaste "${nombre}" al catálogo.`);
+    } catch (error) {
+        mostrarFeedback("⚠️ " + error.message, "error");
+    } finally {
+        form.elements.nombre.focus();
+    }
+});
 
-            case 0:
-                mostrarMensaje("Has salido del simulador.");
-                break;
+// Acciones de cada tarjeta (delegación de eventos)
+listaProductos.addEventListener("click", (evento) => {
+    const boton = evento.target.closest("button[data-accion]");
+    if (!boton) return;
+
+    const tarjeta = boton.closest(".tarjeta");
+    const id = Number(tarjeta.dataset.id);
+    const { accion } = boton.dataset;
+
+    try {
+        if (accion === "eliminar") {
+            const { nombre } = eliminarProducto(id);
+            mostrarFeedback(`🗑️ Se eliminó "${nombre}".`);
+        } else if (accion === "comprar") {
+            const { nombre, cantidad } = comprarProducto(id, Number(tarjeta.querySelector(".cantidad").value));
+            mostrarFeedback(`✔️ Agregaste ${cantidad} x ${nombre} al carrito.`);
+        } else if (accion === "descuento") {
+            const { nombre, precio } = aplicarDescuento(id, Number(tarjeta.querySelector(".porcentaje").value));
+            idResaltado = id;
+            mostrarFeedback(`✔️ Nuevo precio de ${nombre}: ${formatearPrecio(precio)}`);
         }
-    } while (opcion !== 0);
-}
-
-function valoracion(mensaje) {
-    let respuesta = parseInt(prompt(mensaje + " (1 = sí / 2 = no)"));
-    while (respuesta !== 1) {
-        respuesta = parseInt(prompt("Hasta que no digas que sí, no podés salir. (1 = sí)"));
+    } catch (error) {
+        mostrarFeedback("⚠️ " + error.message, "error");
+    } finally {
+        sincronizar();
     }
-    mostrarMensaje("Gracias por valorar el programa.");
+});
+
+// Quitar un ítem del carrito
+listaCarrito.addEventListener("click", (evento) => {
+    const boton = evento.target.closest("button[data-id]");
+    if (!boton) return;
+    try {
+        const nombre = quitarDelCarrito(Number(boton.dataset.id));
+        mostrarFeedback(`🗑️ Quitaste "${nombre}" del carrito.`);
+    } catch (error) {
+        mostrarFeedback("⚠️ " + error.message, "error");
+    } finally {
+        sincronizar();
+    }
+});
+
+$("#btn-vaciar").addEventListener("click", () => {
+    try {
+        vaciarCarrito();
+        mostrarFeedback("🗑️ Carrito vaciado.");
+    } catch (error) {
+        mostrarFeedback("⚠️ " + error.message, "error");
+    } finally {
+        sincronizar();
+    }
+});
+
+$("#btn-eliminar-ultimo").addEventListener("click", () => {
+    try {
+        const { nombre } = eliminarUltimo(catalogo);
+        mostrarFeedback(`🗑️ Se eliminó el último producto: "${nombre}".`);
+    } catch (error) {
+        mostrarFeedback("⚠️ " + error.message, "error");
+    } finally {
+        sincronizar();
+    }
+});
+
+// Filtros: evento de teclado (buscar) y precio máximo
+$("#buscador").addEventListener("keyup", (evento) => {
+    filtros.texto = evento.target.value.trim();
+    renderCatalogo();
+});
+
+$("#precio-max").addEventListener("input", (evento) => {
+    const valor = parseFloat(evento.target.value);
+    filtros.maximo = isNaN(valor) ? null : valor;
+    renderCatalogo();
+});
+
+$("#btn-top").addEventListener("click", () => {
+    soloTop = !soloTop;
+    renderCatalogo();
+});
+
+// =====================================================
+// INICIO
+// =====================================================
+function iniciar() {
+    categorias.forEach((categoria) => {
+        form.elements.categoria.append(new Option(categoria, categoria));
+    });
+    programarAviso("Cotización del dólar hoy: $1.200", 4000);
+    cargarProductos();
 }
 
-function main() {
-    verificarObjetos(producto1, producto2, producto3);
-    menu(catalogo, carrito, categorias);
-    valoracion("¿Te gustó el programa?");
-}
-
-main();
+iniciar();

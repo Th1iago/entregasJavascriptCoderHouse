@@ -1,11 +1,49 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tienda de repuestos</title>
 </head>
 <body>
-    <script src="js/main.js"></script>
+  <header class="cabecera">
+    <h1>Tienda de repuestos</h1>
+    <p id="aviso" class="aviso" hidden></p>
+  </header>
+
+  <p id="feedback" class="feedback" role="status" aria-live="polite"></p>
+
+  <main class="layout">
+    <section class="columna">
+      <h2>Agregar producto</h2>
+      <form id="form-producto" class="form" novalidate>
+        <label>Nombre <input name="nombre" type="text" placeholder="Ej: Correa de distribución"></label>
+        <label>Precio <input name="precio" type="number" min="1" placeholder="Ej: 15000"></label>
+        <label>Categoría <select name="categoria"></select></label>
+        <label>Stock <input name="stock" type="number" min="0" placeholder="Ej: 10"></label>
+        <label class="check"><input name="destacado" type="checkbox"> Oferta destacada (va al principio)</label>
+        <button type="submit">Agregar producto</button>
+      </form>
+
+      <h2>Carrito</h2>
+      <ul id="lista-carrito" class="carrito"></ul>
+      <p class="total">Total: <strong id="total-carrito">$0</strong></p>
+      <button id="btn-vaciar" type="button" class="secundario">Vaciar carrito</button>
+    </section>
+
+    <section class="columna ancha">
+      <h2>Catálogo</h2>
+      <p id="estado" class="estado"></p>
+      <div class="filtros">
+        <input id="buscador" type="search" placeholder="Buscar por nombre...">
+        <input id="precio-max" type="number" min="1" placeholder="Precio máximo">
+        <button id="btn-top" type="button" class="secundario">Ver los 3 más caros</button>
+        <button id="btn-eliminar-ultimo" type="button" class="secundario">Eliminar el último</button>
+      </div>
+      <div id="lista-productos" class="grilla"></div>
+    </section>
+  </main>
+
+  <script src="js/main.js" defer></script>
 </body>
 </html>
