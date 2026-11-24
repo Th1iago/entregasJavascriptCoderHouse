@@ -1,0 +1,10 @@
+[
+    { "id": 1, "nombre": "Pastillas de freno", "precio": 18500, "categoria": "Frenos", "stock": 12 },
+    { "id": 2, "nombre": "Filtro de aceite", "precio": 4200, "categoria": "Filtros", "stock": 30 },
+    { "id": 3, "nombre": "Amortiguador delantero", "precio": 62000, "categoria": "Suspensión", "stock": 6 },
+    { "id": 4, "nombre": "Bujía", "precio": 3800, "categoria": "Motor", "stock": 40 },
+    { "id": 5, "nombre": "Batería 12V", "precio": 95000, "categoria": "Eléctrico", "stock": 5 },
+    { "id": 6, "nombre": "Disco de freno ventilado", "precio": 41000, "categoria": "Frenos", "stock": 8 },
+    { "id": 7, "nombre": "Filtro de aire", "precio": 5600, "categoria": "Filtros", "stock": 22 },
+    { "id": 8, "nombre": "Correa de distribución", "precio": 27500, "categoria": "Motor", "stock": 10 }
+]

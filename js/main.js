@@ -1,22 +1,17 @@
 // =====================================================
 // TIENDA DE REPUESTOS - Simulador
-// Pre-entregas: Funciones, DOM y eventos, Storage, Asincronismo
+// Pre-entrega 10: APIs, Peticiones y Librerías
+// (fetch + async/await + Toastify + SweetAlert2)
 // =====================================================
 
 // ---------- Datos ----------
 const IVA = 1.21;
 const CLAVE_CATALOGO = "catalogo";
 const CLAVE_CARRITO = "carrito";
+const URL_DATA = "./data.json";
+const URL_DOLAR = "https://dolarapi.com/v1/dolares/oficial";
 
 const categorias = ["Frenos", "Filtros", "Suspensión", "Motor", "Eléctrico"];
-
-const catalogoInicial = [
-    { id: 1, nombre: "Pastillas de freno", precio: 18500, categoria: "Frenos", stock: 12 },
-    { id: 2, nombre: "Filtro de aceite", precio: 4200, categoria: "Filtros", stock: 30 },
-    { id: 3, nombre: "Amortiguador delantero", precio: 62000, categoria: "Suspensión", stock: 6 },
-    { id: 4, nombre: "Bujía", precio: 3800, categoria: "Motor", stock: 40 },
-    { id: 5, nombre: "Batería 12V", precio: 95000, categoria: "Eléctrico", stock: 5 }
-];
 
 // ---------- Estado ----------
 let catalogo = [];
@@ -24,7 +19,6 @@ let carrito = [];
 let filtros = { texto: "", maximo: null };
 let soloTop = false;
 let idResaltado = null;
-let temporizadorFeedback;
 
 // ---------- Elementos del DOM ----------
 const $ = (selector) => document.querySelector(selector);
@@ -33,7 +27,6 @@ const form = $("#form-producto");
 const listaProductos = $("#lista-productos");
 const listaCarrito = $("#lista-carrito");
 const totalCarrito = $("#total-carrito");
-const feedback = $("#feedback");
 const estado = $("#estado");
 const aviso = $("#aviso");
 
@@ -52,11 +45,10 @@ const generarId = (lista) => Math.max(0, ...lista.map((p) => p.id)) + 1;
 const formatearPrecio = (valor) => "$" + valor.toLocaleString("es-AR");
 
 // =====================================================
-// STORAGE (lectura con ?? y JSON.parse, escritura con JSON.stringify)
+// STORAGE
 // =====================================================
 function leerStorage(clave, porDefecto) {
     try {
-        // ?? cubre el caso de la primera vez, cuando todavía no existe la clave
         return JSON.parse(localStorage.getItem(clave) ?? "null") ?? porDefecto;
     } catch (error) {
         return porDefecto; // JSON corrupto: arrancamos con el valor por defecto
@@ -73,59 +65,114 @@ const persistir = () => {
 };
 
 // =====================================================
-// FEEDBACK VISUAL
+// LIBRERÍAS: Toastify (avisos) y SweetAlert2 (confirmaciones / errores)
 // =====================================================
+const COLORES_TOAST = {
+    ok: "linear-gradient(to right, #16a34a, #22c55e)",
+    error: "linear-gradient(to right, #b91c1c, #ef4444)",
+    info: "linear-gradient(to right, #1d4ed8, #3b82f6)"
+};
+
+// Mantiene la misma firma que antes, pero ahora usa Toastify
 function mostrarFeedback(texto, tipo = "ok") {
-    clearTimeout(temporizadorFeedback);
-    feedback.textContent = texto;
-    feedback.className = "feedback " + tipo;
-    temporizadorFeedback = setTimeout(() => {
-        feedback.textContent = "";
-        feedback.className = "feedback";
-    }, 4000);
+    Toastify({
+        text: texto,
+        duration: 3500,
+        gravity: "top",
+        position: "right",
+        close: true,
+        stopOnFocus: true,
+        style: { background: COLORES_TOAST[tipo] ?? COLORES_TOAST.info }
+    }).showToast();
+}
+
+// Devuelve true/false según lo que elija el usuario
+async function confirmar(titulo, texto, textoBoton) {
+    const { isConfirmed } = await Swal.fire({
+        title: titulo,
+        text: texto,
+        icon: "warning",
+        showCancelButton: true,
+        confirmButtonText: textoBoton,
+        cancelButtonText: "Cancelar",
+        confirmButtonColor: "#b91c1c"
+    });
+    return isConfirmed;
 }
 
 // =====================================================
-// ASINCRONISMO
+// ASINCRONISMO: fetch + async/await
 // =====================================================
 
-// Promesa: simula una carga de datos del servidor
-const obtenerCatalogo = () =>
-    new Promise((resolve) => {
-        setTimeout(() => {
-            resolve(leerStorage(CLAVE_CATALOGO, catalogoInicial.map((p) => ({ ...p }))));
-        }, 1500);
-    });
+// Pide el catálogo al archivo data.json local
+async function obtenerCatalogo() {
+    const respuesta = await fetch(URL_DATA);
+    if (!respuesta.ok) {
+        throw new Error(`Error ${respuesta.status} al pedir ${URL_DATA}`);
+    }
+    return await respuesta.json();
+}
 
-// Se consume con async/await dentro de try/catch/finally
+// Muestra / oculta el feedback de carga en pantalla
+function mostrarCargando(cargando) {
+    listaProductos.setAttribute("aria-busy", String(cargando));
+    estado.textContent = cargando ? "⏳ Cargando productos..." : "";
+}
+
+// Carga inicial: loading -> datos o error -> render
 async function cargarProductos() {
-    estado.textContent = "⏳ Cargando productos...";
+    mostrarCargando(true);
     try {
-        catalogo = await obtenerCatalogo();
+        const datosApi = await obtenerCatalogo();
+        // Si el usuario ya tenía cambios guardados, se respetan; si no, usa data.json
+        catalogo = leerStorage(CLAVE_CATALOGO, null) ?? datosApi;
         carrito = leerStorage(CLAVE_CARRITO, []);
         persistir();
         renderTodo();
         mostrarFeedback(`✔️ ${catalogo.length} productos cargados`);
     } catch (error) {
-        mostrarFeedback("⚠️ No se pudieron cargar los productos, intentá de nuevo", "error");
+        console.error(error);
+        await manejarErrorDeCarga();
     } finally {
-        estado.textContent = ""; // se ejecuta siempre
+        mostrarCargando(false);
     }
 }
 
-// Temporizador: información complementaria unos segundos después de entrar
-function programarAviso(texto, milisegundos) {
-    setTimeout(() => {
-        aviso.textContent = "🔔 " + texto;
+// Si falla el fetch: avisa con SweetAlert2 y permite reintentar
+async function manejarErrorDeCarga() {
+    listaProductos.replaceChildren(
+        crearElemento("p", "sin-stock", "⚠️ No se pudieron cargar los productos.")
+    );
+
+    const { isConfirmed } = await Swal.fire({
+        title: "No pudimos cargar los productos",
+        text: "Revisá tu conexión o que exista el archivo data.json e intentá de nuevo.",
+        icon: "error",
+        showCancelButton: true,
+        confirmButtonText: "Reintentar",
+        cancelButtonText: "Cerrar"
+    });
+    if (isConfirmed) cargarProductos();
+}
+
+// Segunda petición: cotización del dólar desde una API pública (opcional, no rompe nada si falla)
+async function cargarCotizacionDolar() {
+    try {
+        const respuesta = await fetch(URL_DOLAR);
+        if (!respuesta.ok) throw new Error("API del dólar no disponible");
+        const { venta } = await respuesta.json();
+        aviso.textContent = `🔔 Cotización del dólar oficial hoy: ${formatearPrecio(venta)}`;
         aviso.hidden = false;
-    }, milisegundos);
+    } catch (error) {
+        console.error(error);
+        aviso.hidden = true; // si falla, simplemente no se muestra
+    }
 }
 
 // =====================================================
 // LÓGICA DEL SIMULADOR (entrada -> procesamiento -> salida)
 // =====================================================
 
-// Entrada: lee y valida el formulario (lanza error si hay datos inválidos)
 function leerFormulario(formulario) {
     const { nombre, precio, categoria, stock, destacado } = formulario.elements;
     const datos = {
@@ -143,7 +190,6 @@ function leerFormulario(formulario) {
     return { datos, alPrincipio: destacado.checked };
 }
 
-// Procesamiento
 function agregarProducto(datos, alPrincipio) {
     const nuevo = { id: generarId(catalogo), ...datos };
     alPrincipio ? catalogo.unshift(nuevo) : catalogo.push(nuevo);
@@ -189,7 +235,6 @@ function aplicarDescuento(id, porcentaje) {
     return producto;
 }
 
-// Devuelve el stock al catálogo (si el producto todavía existe)
 function devolverStock(id, cantidad) {
     const producto = buscarPorId(catalogo, id);
     if (producto) producto.stock += cantidad;
@@ -209,7 +254,6 @@ function vaciarCarrito() {
     carrito = [];
 }
 
-// Qué productos se ven según búsqueda, precio máximo y "3 más caros"
 function obtenerVista(lista, { texto, maximo }, mostrarTop) {
     const resultado = lista.filter(
         ({ nombre, precio }) =>
@@ -298,7 +342,6 @@ function renderTodo() {
     renderCarrito();
 }
 
-// Actualiza datos -> guarda en localStorage -> vuelve a renderizar
 function sincronizar() {
     persistir();
     renderTodo();
@@ -325,23 +368,32 @@ form.addEventListener("submit", (evento) => {
 });
 
 // Acciones de cada tarjeta (delegación de eventos)
-listaProductos.addEventListener("click", (evento) => {
+listaProductos.addEventListener("click", async (evento) => {
     const boton = evento.target.closest("button[data-accion]");
     if (!boton) return;
 
     const tarjeta = boton.closest(".tarjeta");
     const id = Number(tarjeta.dataset.id);
     const { accion } = boton.dataset;
+    const cantidadIngresada = Number(tarjeta.querySelector(".cantidad").value);
+    const descuentoIngresado = Number(tarjeta.querySelector(".porcentaje").value);
 
     try {
         if (accion === "eliminar") {
+            const producto = buscarPorId(catalogo, id);
+            const ok = await confirmar(
+                "¿Eliminar producto?",
+                `Vas a eliminar "${producto?.nombre}" del catálogo.`,
+                "Sí, eliminar"
+            );
+            if (!ok) return;
             const { nombre } = eliminarProducto(id);
             mostrarFeedback(`🗑️ Se eliminó "${nombre}".`);
         } else if (accion === "comprar") {
-            const { nombre, cantidad } = comprarProducto(id, Number(tarjeta.querySelector(".cantidad").value));
+            const { nombre, cantidad } = comprarProducto(id, cantidadIngresada);
             mostrarFeedback(`✔️ Agregaste ${cantidad} x ${nombre} al carrito.`);
         } else if (accion === "descuento") {
-            const { nombre, precio } = aplicarDescuento(id, Number(tarjeta.querySelector(".porcentaje").value));
+            const { nombre, precio } = aplicarDescuento(id, descuentoIngresado);
             idResaltado = id;
             mostrarFeedback(`✔️ Nuevo precio de ${nombre}: ${formatearPrecio(precio)}`);
         }
@@ -366,8 +418,16 @@ listaCarrito.addEventListener("click", (evento) => {
     }
 });
 
-$("#btn-vaciar").addEventListener("click", () => {
+$("#btn-vaciar").addEventListener("click", async () => {
     try {
+        if (carrito.length > 0) {
+            const ok = await confirmar(
+                "¿Vaciar carrito?",
+                "Se van a quitar todos los productos y se devuelve el stock.",
+                "Sí, vaciar"
+            );
+            if (!ok) return;
+        }
         vaciarCarrito();
         mostrarFeedback("🗑️ Carrito vaciado.");
     } catch (error) {
@@ -377,8 +437,16 @@ $("#btn-vaciar").addEventListener("click", () => {
     }
 });
 
-$("#btn-eliminar-ultimo").addEventListener("click", () => {
+$("#btn-eliminar-ultimo").addEventListener("click", async () => {
     try {
+        if (catalogo.length > 0) {
+            const ok = await confirmar(
+                "¿Eliminar el último producto?",
+                `Se va a eliminar "${catalogo[catalogo.length - 1].nombre}".`,
+                "Sí, eliminar"
+            );
+            if (!ok) return;
+        }
         const { nombre } = eliminarUltimo(catalogo);
         mostrarFeedback(`🗑️ Se eliminó el último producto: "${nombre}".`);
     } catch (error) {
@@ -388,7 +456,7 @@ $("#btn-eliminar-ultimo").addEventListener("click", () => {
     }
 });
 
-// Filtros: evento de teclado (buscar) y precio máximo
+// Filtros
 $("#buscador").addEventListener("keyup", (evento) => {
     filtros.texto = evento.target.value.trim();
     renderCatalogo();
@@ -412,8 +480,8 @@ function iniciar() {
     categorias.forEach((categoria) => {
         form.elements.categoria.append(new Option(categoria, categoria));
     });
-    programarAviso("Cotización del dólar hoy: $1.200", 4000);
-    cargarProductos();
+    cargarProductos();       // fetch a data.json
+    cargarCotizacionDolar(); // fetch a API pública
 }
 
 iniciar();
